@@ -2,13 +2,25 @@
 // Font Stack — Figma backend logic
 // Build with: npx tsc  (typings: @figma/plugin-typings)
 figma.showUI(__html__, { width: 780, height: 620, themeColors: true });
-// Groups the flat list returned by listAvailableFontsAsync
-// (one Font per family/style pair) into families with their styles.
+// Drops fonts whose name failed to decode (only "?"/U+FFFD/control chars):
+// unpreviewable and unloadable, so a broken "?????" row would be worse.
+function isUsableFamilyName(name) {
+    if (!name || !name.trim())
+        return false;
+    if (/^[?\uFFFD\s]+$/.test(name))
+        return false;
+    if (/[\u0000-\u001F]/.test(name))
+        return false;
+    return true;
+}
+// Groups listAvailableFontsAsync (one Font per family/style) into families.
 async function collectFamilies() {
     const fonts = await figma.listAvailableFontsAsync();
     const byFamily = new Map();
     for (const font of fonts) {
         const { family, style } = font.fontName;
+        if (!isUsableFamilyName(family))
+            continue;
         const styles = byFamily.get(family);
         if (styles) {
             if (styles.indexOf(style) === -1)
@@ -40,8 +52,7 @@ async function createTextNodes(text, fontSize, fonts) {
             continue;
         }
         const node = figma.createText();
-        // fontName first: characters/fontSize require the node's CURRENT font
-        // to be loaded, and that is precisely the one just loaded above.
+        // fontName before characters/fontSize: they need the CURRENT font loaded.
         node.fontName = fontName;
         node.characters = text || fontName.family;
         node.fontSize = fontSize;
@@ -67,8 +78,7 @@ async function createTextNodes(text, fontSize, fonts) {
 }
 figma.ui.onmessage = async (msg) => {
     if (msg.type === 'init') {
-        // clientStorage: persists across all Figma files, scoped to the
-        // user and the plugin, local to the machine.
+        // clientStorage: per user+plugin, local to the machine, across all files.
         const [families, collections] = await Promise.all([
             collectFamilies(),
             figma.clientStorage.getAsync('collections')

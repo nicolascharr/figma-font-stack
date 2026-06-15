@@ -38,6 +38,17 @@ npx tsc --watch   # recompiles code.ts → code.js on every change
 
 The UI (`ui.html`) is self-contained: HTML, CSS and JavaScript in a single file, no dependencies, no bundler.
 
+### Regenerating the font directory
+
+`ui.html` bundles a snapshot of the Google Fonts directory (`GF_STYLE_SETS` / `GF_FAMILY`): the set of families and the weights/italics each one ships. Cloud previews are gated against it so the plugin only ever requests a stylesheet that resolves to `200` — a request for an unknown family or an unavailable axis returns `400`, and the browser prints that error to the console no matter how the `fetch` is wrapped. Refresh the snapshot when Google adds fonts:
+
+```sh
+curl -s https://fonts.google.com/metadata/fonts \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(x['family'] for x in d['familyMetadataList']))"
+```
+
+Each `familyMetadataList` entry exposes a `fonts` map whose keys are the available style codes (`400`, `400i`, …); rebuild `GF_STYLE_SETS` (deduplicated signatures) and `GF_FAMILY` (family → signature index) from those.
+
 ## How it works
 
 ```
@@ -49,7 +60,7 @@ The UI (`ui.html`) is self-contained: HTML, CSS and JavaScript in a single file,
 ```
 
 - **`code.ts`** queries `figma.listAvailableFontsAsync()`, groups family/style pairs by family and sends them to the UI. On insertion, it calls `await figma.loadFontAsync()` for each checked font **before** creating the `TextNode` (setting `fontName` before `characters`, as the API requires), then stacks the nodes vertically.
-- **`ui.html`** classifies families with a keyword heuristic (the Figma API provides no category), filters, and renders the list in batches. Cloud families are fetched from the Google Fonts CSS API one request per family (a single unknown family fails a grouped request), for visible rows only, and their `@font-face` rules are aliased to the Figma family name before injection.
+- **`ui.html`** classifies families with a keyword heuristic (the Figma API provides no category), filters, and renders the list in batches. Cloud families are fetched from the Google Fonts CSS API one request per family, for visible rows only, and their `@font-face` rules are aliased to the Figma family name before injection. Each request is validated against a bundled snapshot of the Google Fonts directory first (family **and** the requested weight/italic), so a non-Google cloud font or an unavailable axis is skipped instead of triggering a `400` (and its CORS error) in the console.
 - **`manifest.json`** uses the current format: `documentAccess: "dynamic-page"` and `networkAccess` restricted to `fonts.googleapis.com` / `fonts.gstatic.com`.
 
 ## Known limitations
